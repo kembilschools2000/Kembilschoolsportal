@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Payments | Kembil Schools</title>
+
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Paystack -->
+  <script src="https://js.paystack.co/v1/inline.js"></script>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <style>
+    body { font-family:'Segoe UI', sans-serif; background:#f7f9fb; margin:0; padding:0; }
+    header { background:#007bff; color:#fff; padding:12px 20px; text-align:center; font-size:22px; font-weight:bold; }
+    .container { max-width:900px; margin:30px auto; background:#fff; border-radius:10px; padding:20px; box-shadow:0 3px 10px rgba(0,0,0,0.1); }
+    h2 { text-align:center; color:#333; }
+    .payment-section { margin-bottom:30px; border-top:2px solid #007bff; padding-top:10px; }
+    table { width:100%; border-collapse: collapse; margin-top:10px; }
+    th, td { border:1px solid #ddd; padding:10px; text-align:center; }
+    th { background:#007bff; color:#fff; }
+    .no-payments { text-align:center; color:#999; margin-top:20px; font-size:18px; }
+    .btn-group { display:flex; justify-content:center; gap:15px; margin-top:20px; }
+    button { border:none; border-radius:8px; padding:8px 16px; cursor:pointer; color:white; font-weight:600; }
+    #logoutBtn { background: crimson; }
+    #payBtn { background: #007bff; }
+    #downloadBtn { background:#28a745; }
+    #downloadBtn.disabled { background:#c6cbd6; cursor:not-allowed; }
+    @media print { #logoutBtn, #payBtn, #downloadBtn, header { display:none; } body { background:white; } .container { box-shadow:none; } 
+      .vertical-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 15px 0;
+  border: 1px solid #ddd;
+}
+
+.vertical-table th {
+  width: 30%;
+  text-align: left;
+  background: #007bff;
+  color: #fff;
+  padding: 8px;
+  border-right: 1px solid #ddd;
+}
+
+.vertical-table td {
+  padding: 8px;
+  color: #333;
+  border-bottom: 1px solid #ddd;
+}
+
+.payment-section {
+  margin-bottom: 25px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.05);
+}
+    }
+  </style>
+</head>
+<body>
+  <header>Kembil Schools - Student Payments</header>
+
+  <div class="container" id="paymentPage">
+    <h2>Your Payment History</h2>
+    <div id="paymentsContainer">
+      <p class="no-payments">Loading your payments...</p>
+    </div>
+
+    <div class="btn-group">
+      <button id="payBtn">Pay with Debit Card</button>
+      <button id="downloadBtn" class="disabled" disabled>Download Receipt (PDF)</button>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </div>
+
+  <script>
+    // 🔹 Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDtvLEYFnNmmge6WYTrlrO2BTtkqgBWYxg",
+      authDomain: "kembil-schools.firebaseapp.com",
+      projectId: "kembil-schools",
+      storageBucket: "kembil-schools.appspot.com",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    const paymentsContainer = document.getElementById("paymentsContainer");
+    const payBtn = document.getElementById("payBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+
+    let studentData = {};
+    let latestPayment = null;
+
+    // 🔹 Auth listener
+    auth.onAuthStateChanged(async (user) => {
+      if(!user){
+        window.location.href="login.html"; return;
+      }
+      const studentId = user.uid;
+
+      // Fetch student info
+      const studentDoc = await db.collection("students").doc(studentId).get();
+      studentData = studentDoc.exists ? studentDoc.data() : {};
+
+      // Fetch payments
+      const paymentsRef = db.collection("students").doc(studentId).collection("payments").orderBy("timestamp","desc");
+      const snapshot = await paymentsRef.get();
+
+      if(snapshot.empty){
+        paymentsContainer.innerHTML = '<p class="no-payments">No payments available yet.</p>';
+        payBtn.disabled = false; // Allow new payment
+        downloadBtn.disabled = true;
+        downloadBtn.classList.add("disabled");
+        return;
+      }
+
+// Build payment history table (vertical layout)
+let html = '';
+snapshot.forEach(doc => {
+  const data = doc.data();
+  const date = data.timestamp ? data.timestamp.toDate().toLocaleDateString() : "—";
+
+  html += `
+  <div class="payment-section">
+    <table class="vertical-table">
+      <tr><th>Date</th><td>${date}</td></tr>
+      <tr><th>Type</th><td>${data.paymentType || '-'}</td></tr>
+      <tr><th>Amount (₦)</th><td>${data.amount || 0}</td></tr>
+      <tr><th>Term</th><td>${data.term || '-'}</td></tr>
+      <tr><th>Session</th><td>${data.session || '-'}</td></tr>
+      <tr><th>Status</th><td>${data.status || 'pending'}</td></tr>
+    </table>
+  </div>`;
+});
+
+paymentsContainer.innerHTML = html;
+
+      // Latest payment for receipt & Paystack
+      latestPayment = snapshot.docs[0].data();
+      latestPayment.docId = snapshot.docs[0].id;
+
+      // Enable download if paid
+      if(latestPayment.status==="paid"){
+        downloadBtn.disabled = false;
+        downloadBtn.classList.remove("disabled");
+      }
+    });
+
+    // 🔹 Paystack integration
+    payBtn.addEventListener("click", () => {
+      if(!latestPayment || latestPayment.status==="paid"){
+        alert("No pending payment or already paid."); return;
+      }
+      const handler = PaystackPop.setup({
+        key: "pk_test_REPLACE_WITH_YOUR_PUBLIC_KEY", // Replace
+        email: studentData.email,
+        amount: Number(latestPayment.amount)*100, // kobo
+        currency: "NGN",
+        channels:['card'],
+        callback: async function(response){
+          // Update Firestore on success
+          const studentId = auth.currentUser.uid;
+          await db.collection("students").doc(studentId)
+                  .collection("payments").doc(latestPayment.docId)
+                  .update({status:"paid", paystackRef:response.reference});
+          alert("Payment successful!");
+          location.reload(); // Refresh to show updated status
+        },
+        onClose: function(){
+          alert('Payment window closed.');
+        }
+      });
+      handler.openIframe();
+    });
+
+    // 🔹 Download PDF (simple table + student info)
+    downloadBtn.addEventListener("click", () => {
+      if(!latestPayment || latestPayment.status!=="paid"){ return; }
+      const doc = new jspdf.jsPDF();
+      doc.setFontSize(16);
+      doc.text("Kembil Schools Payment Receipt", 105, 15, null, null, "center");
+      doc.setFontSize(12);
+      doc.text(`Student: ${studentData.name||"-"}`, 14, 30);
+      doc.text(`Class: ${studentData.class||"-"}`, 14, 38);
+      doc.text(`Email: ${studentData.email||"-"}`, 14, 46);
+
+      doc.text("Payment Details",14,58);
+      doc.autoTable({
+        startY: 62,
+        head:[['Date','Type','Amount','Term','Session','Status']],
+        body:[[latestPayment.timestamp ? latestPayment.timestamp.toDate().toLocaleDateString():"-",
+               latestPayment.paymentType||"-",
+               latestPayment.amount||0,
+               latestPayment.term||"-",
+               latestPayment.session||"-",
+               latestPayment.status||"pending"]]
+      });
+
+      doc.save("payment_receipt.pdf");
+    });
+
+    // 🔹 Logout
+    logoutBtn.addEventListener("click", ()=>{
+      auth.signOut().then(()=>window.location.href="login.html");
+    });
+  </script>
+</body>
+</html>

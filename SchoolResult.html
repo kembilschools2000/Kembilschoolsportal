@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Results | Kembil Schools</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f7f9fb;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #007bff;
+      color: #fff;
+      padding: 12px 20px;
+      text-align: center;
+      font-size: 22px;
+      font-weight: bold;
+    }
+    .container {
+      max-width: 900px;
+      margin: 30px auto;
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+      color: #333;
+    }
+    .result-section {
+      margin-bottom: 30px;
+      border-top: 2px solid #007bff;
+      padding-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: center;
+    }
+    th {
+      background: #007bff;
+      color: #fff;
+    }
+    .no-results {
+      text-align: center;
+      color: #999;
+      margin-top: 20px;
+      font-size: 18px;
+    }
+    .btn-group {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-top: 20px;
+    }
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      cursor: pointer;
+      color: white;
+      font-weight: 600;
+    }
+    #logoutBtn { background: crimson; }
+    #printBtn { background: #007bff; }
+    @media print {
+      #logoutBtn, #printBtn, header { display: none; }
+      body { background: white; }
+      .container { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>Kembil Schools - Student Results</header>
+
+  <div class="container" id="resultPage">
+    <h2>Your Academic Results</h2>
+    <div id="resultsContainer">
+      <p class="no-results">Loading your results...</p>
+    </div>
+    <div class="btn-group">
+      <button id="printBtn">Print / Download PDF</button>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </div>
+
+  <script>
+    // ✅ Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDtvLEYFnNmmge6WYTrlrO2BTtkqgBWYxg",
+      authDomain: "kembil-schools.firebaseapp.com",
+      projectId: "kembil-schools",
+      storageBucket: "kembil-schools.appspot.com",
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const resultsContainer = document.getElementById('resultsContainer');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const printBtn = document.getElementById('printBtn');
+
+    // 🔹 Function to generate auto comment
+    function getComment(avg) {
+      if (avg >= 75) return "🌟 Excellent performance! Keep it up.";
+      if (avg >= 60) return "👍 Good job! You can do even better.";
+      if (avg >= 45) return "🙂 Fair effort, needs more improvement.";
+      return "⚠️ Poor performance, work harder next term.";
+    }
+
+    // 🔹 Auth listener
+    firebase.auth().onAuthStateChanged(async (user) => {
+      if (!user) {
+        alert("Please log in first.");
+        window.location.href = "login.html";
+        return;
+      }
+
+      try {
+        const resultsRef = db.collection("students").doc(user.uid).collection("results");
+        const snapshot = await resultsRef.orderBy("createdAt", "desc").get();
+
+        if (snapshot.empty) {
+          resultsContainer.innerHTML = '<p class="no-results">No results available yet.</p>';
+          return;
+        }
+
+        let html = '';
+        snapshot.forEach(doc => {
+          const res = doc.data();
+
+          // Compute average score
+          let total = 0;
+          res.records.forEach(r => total += Number(r.score || 0));
+          const avg = (total / res.records.length).toFixed(1);
+
+          // Generate HTML for each term/session result
+          html += `
+            <div class="result-section">
+              <h3>${res.session.replace(/_/g, "/")} - ${res.term}</h3>
+              <p><b>Class:</b> ${res.class}</p>
+              <table>
+                <tr>
+                  <th>Subject</th>
+                  <th>Score</th>
+                  <th>Grade</th>
+                </tr>
+                ${res.records.map(r => `
+                  <tr>
+                    <td>${r.subject}</td>
+                    <td>${r.score}</td>
+                    <td>${r.grade}</td>
+                  </tr>
+                `).join('')}
+              </table>
+              <p><b>Average:</b> ${avg}%</p>
+              <p><b>Teacher's Comment:</b> ${getComment(avg)}</p>
+            </div>
+          `;
+        });
+
+        resultsContainer.innerHTML = html;
+      } catch (error) {
+        resultsContainer.innerHTML = `<p class="no-results">Error loading results: ${error.message}</p>`;
+      }
+    });
+
+    // ✅ Logout
+    logoutBtn.addEventListener("click", () => {
+      firebase.auth().signOut().then(() => {
+        window.location.href = "login.html";
+      });
+    });
+
+    // ✅ Print or Download PDF
+    printBtn.addEventListener("click", () => {
+      window.print();
+    });
+  </script>
+</body>
+</html>
